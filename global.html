@@ -1,0 +1,367 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+
+<!-- Global Page for Safari RSS Feed Extension
+     © 2012-13 Calum Benson
+     Licence: None - public domain -->
+
+<html><head>
+
+<!--script type="text/javascript" src="jquery-1.9.1.min.js"></script-->
+<script type="text/javascript" src="jfeed/jquery.js"></script>
+<script type="text/javascript" src="jfeed/jfeed.js"></script>
+<script type="text/javascript" src="jfeed/jfeeditem.js"></script>
+<script type="text/javascript" src="jfeed/jatom.js"></script>
+<script type="text/javascript" src="jfeed/jrss.js"></script>
+<script type="text/javascript" src="js/common.js"></script>
+
+<script type="text/javascript">
+
+/* 	Associative array used to store feed details for all open tabs.
+	allFeeds[tabUrl]={ menulabel: <string>, // Shown as label between unsorted+sorted sections of menu
+					feed1Url:{title:<string> type:<plist/fav/sub/none> sort:<bool>}, 
+					feed2Url:{title:<string> type:<plist/fav/sub/none> sort:<bool>},
+					}
+*/
+var allFeeds = new Object();
+
+safari.application.addEventListener("validate", validateHandler, false);
+safari.application.addEventListener("menu", menuHandler, false); // Just before menu is displayed
+safari.application.addEventListener("command", cmdHandler, false); // Clicked on menu item
+safari.application.addEventListener("message", msgHandler, false); // Received list of feeds from web page
+safari.extension.settings.addEventListener("change", settingsChangeHandler, false); // Settings changed in prefs window
+
+// These two only work in Safari 5.1 and later. They don't bubble, hence second param=true.
+safari.application.addEventListener("close", navigateHandler, true);
+safari.application.addEventListener("beforeNavigate", navigateHandler, true);
+safari.application.addEventListener("navigate", navigateHandler, true);
+
+// We only use jQuery in youtube.js for now, so only load it then. If/when we port
+// pageEndScript.js to use jQuery, probably better to load jquery.js as a start script 
+// in Extension Builder instead.
+safari.extension.addContentScriptFromURL(safari.extension.baseURI+"js/youtube.js", 
+											["http://*.youtube.com/*",
+											 "https://*.youtube.com/*"],/*whitelist*/
+											 [],		 				/*blacklist*/
+											 true 						/*runAtEnd*/
+										);
+
+safari.extension.addContentScriptFromURL(safari.extension.baseURI+"jfeed/jquery.js", 
+											["http://*.youtube.com/*",
+											 "https://*.youtube.com/*"],/*whitelist*/
+											 [],		 				/*blacklist*/
+											 false 						/*runAtEnd*/
+										);
+
+/* Utilities */
+
+function getToolbarBtn(id){
+// Return the toolbar item with the specified id in the active browser window
+
+	const toolbarItems = safari.extension.toolbarItems;
+	const activeBrowserWindow = safari.application.activeBrowserWindow;
+	
+	for (var i = 0; i < toolbarItems.length; ++i) {
+    		var item = toolbarItems[i];
+		    if (item.identifier == id && item.browserWindow == activeBrowserWindow)
+				return item;
+	}
+	return null;
+}
+
+function getMenu(id){
+// Return the menu object with the specified id.
+	var itemArray = safari.extension.menus;
+		for (var i = 0; i < itemArray.length; ++i) {
+    		var item = itemArray[i];
+		    if (item.identifier == id)
+				return item;
+		}
+	return null;
+}
+
+function urlOpenInBrowser(url){
+// Return true if url is open in any tab in any window,
+// otherwise false.
+
+	var w = safari.application.browserWindows;
+	
+	for (var i=0; i<w.length; w++){
+		var t = w[i].tabs;		
+		for (i=0; i < t.length; i++){
+		
+			if (t[i].url === url){
+				return true;		
+			}
+		}
+	}
+	return false;
+}
+
+function updateButton(btn, url)
+//Update btn enabled/disabled state, badge count and badge visibility for given url
+{
+	if (url in allFeeds){
+		// We have already scanned this page
+		clog('d',"Already scanned "+url);
+		
+		//Object.keys(x) returns no. of properties on object x
+		var numFeedsOnPage = Object.keys(allFeeds[url]).length; 
+		if (numFeedsOnPage > 0){
+			// Set badge to number of feeds on page, if user preference dictates
+			btn.disabled = false;
+			if (safari.extension.settings.show_badge == true)
+				btn.badge = numFeedsOnPage;
+		}
+		else{
+			// No feeds found on this page
+			clog('i',"No feeds found for "+url);
+			btn.disabled = true;
+			btn.badge = 0;
+		}
+	}
+	else{
+		// Tab contains blank page
+		clog('d',"Tab contains blank page");
+		btn.disabled = true;
+		btn.badge = 0;
+	}
+}
+
+function openFeedInPreviewTab(unencodedUrl){
+// Open a feed url in a new preview tab
+
+	url = encodeURIComponent(unencodedUrl);
+	safari.application.activeBrowserWindow.openTab('foreground').url = 
+		   				safari.extension.baseURI+'preview.html?'+url+'&sel='+safari.extension.settings.select_url;
+	
+	clog('d',safari.extension.baseURI+'preview.html?'+url+'&sel='+safari.extension.settings.select_url);
+}
+
+/* Safari Extension message handlers */
+
+function cmdHandler(event){
+// Called when user clicks a toolbar button or menu item.
+
+	if (event.command.substr(0,4)=="http"){
+		// Menu item clicked.
+		
+		switch (safari.extension.settings.feed_action){
+		
+			case 'browser':
+				// Open feed in a new tab using our own feed preview code.
+				openFeedInPreviewTab(event.command);
+				break;
+				
+			case 'defaultapp':
+			case 'alwaysask':				
+				// Open feed in default reader application, or ask the user
+				safari.application.activeBrowserWindow.activeTab.page.dispatchMessage
+					("showFeedPopup",[event.command, // We previously set the command to the URL of the feed
+					safari.extension.settings.feed_action, // Which app to use to open the feed (or 'ask')
+					safari.extension.settings.banner_timeout * 1000, // Only used if app to use is 'default app'
+					safari.extension.settings.select_url // Whether to automatically select the feed URL for copying
+					]);
+				break;
+				
+			default:
+				clog('e','Unrecognised feed action: '+safari.extension.settings.feed_action);
+				break;
+		}
+	}
+}
+
+function validateHandler(event){
+// Called automatically when an extension component needs to revalidate itself, e.g. when tab re-gains focus.
+	
+	if (event.target.identifier == "feedMenuBtn"){
+		//Update button enabled/disabled state, badge count and badge visibility.
+		var btn = event.target;
+		var url = event.target.browserWindow.activeTab.url;
+		updateButton(event.target, url);
+	}
+}
+
+function menuHandler(event){
+// Called when the toolbar button menu is about to be displayed.
+		
+	var btn = getToolbarBtn('feedMenuBtn');
+	var feedMenu = getMenu('feedMenu');
+	var feedsToAdd = allFeeds[safari.application.activeBrowserWindow.activeTab.url];
+
+	// Must hide menu before making any dynamic changes
+	feedMenu.visible=false;
+	
+	// Clear the existing menu
+	var l = feedMenu.menuItems.length;
+	if (l>0)
+		for (var i=0; i<l; i++)
+			feedMenu.removeMenuItem(0);
+	
+	// Add the new feeds to the menu, if any
+	btn.menu = feedMenu;
+	
+	var sortedFeeds = [];
+	var unsortedFeeds = [];
+	var menulabel = "";
+	
+	if (feedsToAdd.menulabel != undefined){
+		menulabel = feedsToAdd.menulabel;
+	}
+		
+	if (feedsToAdd!==undefined && Object.keys(feedsToAdd).length > 0){
+		var menuId=0;
+		for (var i in feedsToAdd){
+		
+			if (feedsToAdd[i].sort != undefined){
+				if (feedsToAdd[i].sort == true){
+					sortedFeeds.push ({id:'feed'+ menuId, title:feedsToAdd[i].title, url:i, type:feedsToAdd[i].type});
+				}
+				else{
+					unsortedFeeds.push({id:'feed'+ menuId, title:feedsToAdd[i].title, url:i, type:feedsToAdd[i].type});
+				}
+				menuId++;
+			}
+		}
+	}
+
+	// Sort feeds alphabetically
+	function compareMenuItems(m1,m2){
+		if (m1.title.toUpperCase() < m2.title.toUpperCase()) return -1;
+		if (m1.title.toUpperCase() > m2.title.toUpperCase()) return 1;
+		return 0;
+	}
+	sortedFeeds.sort(compareMenuItems);
+	
+	// Add items to menu, unsorted feeds first. If there are both
+	// sorted and unsorted feeds, put a separator between them.
+		
+	function addItems(items){
+		for (var i=0; i < items.length; i++){
+			feedMenu.appendMenuItem(items[i].id, items[i].title, items[i].url);
+		}
+	}
+	
+	if (unsortedFeeds.length > 0){
+		addItems(unsortedFeeds);
+	}
+	
+	if (sortedFeeds.length > 0){
+		feedMenu.appendSeparator('sepSorted');
+		var seplabel = feedMenu.appendMenuItem('sepLabel', menulabel+":");
+		seplabel.disabled = true;
+		addItems(sortedFeeds);
+	}
+	
+	// Clear badge when button clicked
+	btn.badge = 0;
+}
+
+function msgHandler(event){
+// Called when the pageEndScript has something to tell us.
+
+	switch (event.name){
+   	
+	   	case "foundFeeds":
+	   		// event.message = {href1: {sort:t/f, title:title1}, href2: {sort:t/f, title:title2}...}
+	   		
+	   		if (allFeeds[event.target.url] === undefined){
+	   			allFeeds[event.target.url] = {};
+	   		}
+	   		
+	   		// A neat jQuery function that merges all properties of 
+	   		// second object arg with first object arg
+	   		$.extend(allFeeds[event.target.url], event.message);
+	   		
+	   		updateButton(getToolbarBtn('feedMenuBtn'), event.target.url);
+	   		
+	   		clog('d',"foundFeeds: added allFeeds["+event.target.url+"]");
+			break;
+	   	
+	   	case "openFeedInTab":
+	   		// Couldn't use iframe method to load feed in external app, so need to do it in a new tab
+	   		var url = event.message;
+	   		clog('d',"Opening temporary tab");
+	   		safari.application.activeBrowserWindow.openTab('background').url = httpToFeed(url);
+	   		// Close the tab again after a short delay
+	   		var closetab = function(){
+	   			var t = safari.application.activeBrowserWindow.tabs;
+	   			t[(t.length)-1].close();
+	   			clog('d',"Closed temporary tab");
+	   		}
+	   		setTimeout(closetab,3000);
+	   		break;
+	   		
+	   	case "openLocal":
+	   		// Use built-in RSS viewer to view the feed
+	   		openFeedInPreviewTab(event.message);
+			break;
+	}
+}
+
+function navigateHandler(event){
+// Called when a close, navigate or beforeNavigate event is received.
+// Deletes allFeeds[event.target.url], if that url no longer open in any tab.
+
+	var url = event.target.url;
+
+	switch(event.type){
+
+		case "close":
+			clog('d',"close:");
+			
+		//case "beforeNavigate":
+			// Check if the URL being vacated is still open in some other tab.
+			// But only after a short delay, to give the tab time to close first, if it's going to. 
+			// clog("beforeNavigate:");
+			
+			setTimeout(function(){
+			
+				if (urlOpenInBrowser(url) == false){
+					clog('d',"Deleting menu for url '"+url+"' as not open elsewhere");
+					if (url in allFeeds){
+						delete allFeeds[url];
+						clog('d',"Delete menu for "+url);
+					}
+				}
+			},500);
+			
+			break;
+			
+		case "navigate":
+			// Check if we've already found some feeds on the URL we've
+			// landed on, and update button accordingly.
+			var btn = getToolbarBtn('feedMenuBtn');
+			clog('d',"navigate: update button");
+			updateButton(btn, url);
+	}
+}
+
+function settingsChangeHandler(event){
+// Called when extension settings are changed in the Safari Preferences dialog.
+
+	switch (event.key){
+
+		case "feed_action":
+			// If 'default action' setting is changed, we inform the injected script so it can
+			// hide the popup banner if it's visible at the time.
+			safari.application.activeBrowserWindow.activeTab.page.dispatchMessage
+					("feedActionChanged", 0);
+			break;
+	
+		case "show_badge":
+			// If the show_badge setting is changed, show or hide the badge immediately.
+			var btn = getToolbarBtn('feedMenuBtn');
+			var thisUrl = safari.application.activeBrowserWindow.activeTab.url;
+			
+			if (safari.extension.settings.show_badge == true){
+				btn.badge = Object.keys(allFeeds[url]).length;
+			}
+			else{
+				btn.badge = 0;
+			}
+			break;
+	}
+}
+
+</script></head>
+<body></body></html>

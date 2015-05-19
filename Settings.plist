@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>DefaultValue</key>
+		<string>alwaysask</string>
+		<key>Key</key>
+		<string>feed_action</string>
+		<key>Title</key>
+		<string>Open feeds in</string>
+		<key>Titles</key>
+		<array>
+			<string>Safari</string>
+			<string>RSS reader application</string>
+			<string>Always ask</string>
+		</array>
+		<key>Type</key>
+		<string>RadioButtons</string>
+		<key>Values</key>
+		<array>
+			<string>browser</string>
+			<string>defaultapp</string>
+			<string>alwaysask</string>
+		</array>
+	</dict>
+	<dict>
+		<key>DefaultValue</key>
+		<true/>
+		<key>Key</key>
+		<string>show_badge</string>
+		<key>Title</key>
+		<string>Show badge on toolbar button</string>
+		<key>Type</key>
+		<string>CheckBox</string>
+	</dict>
+	<dict>
+		<key>DefaultValue</key>
+		<real>8</real>
+		<key>Key</key>
+		<string>banner_timeout</string>
+		<key>MaximumValue</key>
+		<real>10</real>
+		<key>Title</key>
+		<string>"Loading" message timeout (secs)</string>
+		<key>Type</key>
+		<string>Hidden</string>
+	</dict>
+	<dict>
+		<key>DefaultValue</key>
+		<false/>
+		<key>Key</key>
+		<string>select_url</string>
+		<key>Title</key>
+		<string>Auto-select feed URL in banner and preview for easier copying </string>
+		<key>Type</key>
+		<string>CheckBox</string>
+	</dict>
+</array>
+</plist>
