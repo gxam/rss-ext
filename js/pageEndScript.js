@@ -231,6 +231,10 @@ function fullyQualifiedURL(h){
 	if (href.substr(0,4) !== "http"){
 		// Specified link is relative, construct the full URL
 
+		if (href[0] == '/' && href[1] == '/') {
+			return protocol(document.URL) + ':' + href;
+		}
+
 		// Remove leading slash if present
 		if (href[0] == '/'){
 			href = href.slice(1);
